@@ -2,14 +2,13 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-// Firebase Console থেকে পাওয়া আপনার কি-গুলো এখানে পেস্ট করুন
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
+  apiKey: "স্ক্রিনে_পাওয়া_apiKey",
   authDomain: "swe-43-c.firebaseapp.com",
   projectId: "swe-43-c",
-  storageBucket: "swe-43-c.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  storageBucket: "swe-43-c.firebasestorage.app",
+  messagingSenderId: "স্ক্রিনে_পাওয়া_messagingSenderId",
+  appId: "স্ক্রিনে_পাওয়া_appId"
 };
 
 const app = initializeApp(firebaseConfig);
