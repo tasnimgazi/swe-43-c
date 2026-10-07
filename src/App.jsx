@@ -14,8 +14,12 @@ import {
   ShieldAlert,
   GraduationCap,
   KeyRound,
-  CheckCircle2
+  CheckCircle2,
+  UploadCloud
 } from 'lucide-react';
+import { db, storage } from './firebase';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, getDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('notices');
@@ -23,66 +27,55 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [showChangePinModal, setShowChangePinModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
   
-  // Custom Admin PIN persistence (Default: '1234')
-  const [adminPin, setAdminPin] = useState(() => {
-    return localStorage.getItem('swe_admin_pin') || '1234';
-  });
-
+  const [adminPin, setAdminPin] = useState(() => localStorage.getItem('swe_admin_pin') || '1234');
   const [oldPinInput, setOldPinInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
-  // Dynamic State with LocalStorage Persistence
-  const [notices, setNotices] = useState(() => {
-    const saved = localStorage.getItem('swe_notices');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, title: 'Algorithm Lab Exam Rescheduled', date: 'Oct 10, 2026', category: 'Exam', content: 'Lab exam moved to Room 402 at 10:00 AM.' },
-      { id: 2, title: 'Software Engineering Project Proposal', date: 'Oct 12, 2026', category: 'Assignment', content: 'Submit slides PDF via the course drive link.' }
-    ];
-  });
+  const [notices, setNotices] = useState([]);
+  const [routineImg, setRoutineImg] = useState('https://via.placeholder.com/800x400?text=Upload+Class+Routine+Image');
+  const [resources, setResources] = useState([]);
+  const [pyqs, setPyqs] = useState([]);
 
-  const [routineImg, setRoutineImg] = useState(() => {
-    return localStorage.getItem('swe_routine') || 'https://via.placeholder.com/800x400?text=Upload+Class+Routine+Image';
-  });
-
-  const [resources, setResources] = useState(() => {
-    const saved = localStorage.getItem('swe_resources');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, course: 'SWE311', title: 'Design Patterns Lecture 01', type: 'Slide', link: '#' },
-      { id: 2, course: 'SWE312', title: 'Database System Architecture', type: 'Note', link: '#' }
-    ];
-  });
-
-  const [pyqs, setPyqs] = useState(() => {
-    const saved = localStorage.getItem('swe_pyqs');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, course: 'SWE311', term: 'Midterm 2025', link: '#' },
-      { id: 2, course: 'SWE312', term: 'Final 2025', link: '#' }
-    ];
-  });
-
+  // Fetch Real-time Cloud Data
   useEffect(() => {
-    localStorage.setItem('swe_notices', JSON.stringify(notices));
-  }, [notices]);
+    // 1. Sync Notices
+    const unsubNotices = onSnapshot(collection(db, 'notices'), (snapshot) => {
+      setNotices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-  useEffect(() => {
-    localStorage.setItem('swe_routine', routineImg);
-  }, [routineImg]);
+    // 2. Sync Routine
+    const unsubRoutine = onSnapshot(doc(db, 'settings', 'routine'), (docSnap) => {
+      if (docSnap.exists()) {
+        setRoutineImg(docSnap.data().url);
+      }
+    });
 
-  useEffect(() => {
-    localStorage.setItem('swe_resources', JSON.stringify(resources));
-  }, [resources]);
+    // 3. Sync Resources
+    const unsubResources = onSnapshot(collection(db, 'resources'), (snapshot) => {
+      setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-  useEffect(() => {
-    localStorage.setItem('swe_pyqs', JSON.stringify(pyqs));
-  }, [pyqs]);
+    // 4. Sync PYQs
+    const unsubPyqs = onSnapshot(collection(db, 'pyqs'), (snapshot) => {
+      setPyqs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsubNotices();
+      unsubRoutine();
+      unsubResources();
+      unsubPyqs();
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('swe_admin_pin', adminPin);
   }, [adminPin]);
 
-  // Admin Auth Handler
+  // Auth & PIN Handlers
   const handleAdminLogin = (e) => {
     e.preventDefault();
     if (pinInput === adminPin) {
@@ -94,7 +87,6 @@ export default function App() {
     }
   };
 
-  // Change PIN Handler
   const handleChangePin = (e) => {
     e.preventDefault();
     if (oldPinInput !== adminPin) {
@@ -102,7 +94,7 @@ export default function App() {
       return;
     }
     if (newPinInput.trim().length < 4) {
-      alert('New PIN must be at least 4 characters/digits long!');
+      alert('New PIN must be at least 4 digits long!');
       return;
     }
     setAdminPin(newPinInput);
@@ -115,54 +107,65 @@ export default function App() {
     }, 1500);
   };
 
-  // Add Item Handlers
-  const addNotice = (e) => {
+  // Cloud Write Handlers
+  const addNotice = async (e) => {
     e.preventDefault();
-    const title = e.target.title.value;
-    const category = e.target.category.value;
-    const content = e.target.content.value;
-    const newNotice = {
-      id: Date.now(),
-      title,
-      category,
-      content,
+    await addDoc(collection(db, 'notices'), {
+      title: e.target.title.value,
+      category: e.target.category.value,
+      content: e.target.content.value,
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    };
-    setNotices([newNotice, ...notices]);
+    });
     e.target.reset();
   };
 
-  const addResource = (e) => {
+  const deleteNotice = async (id) => {
+    await deleteDoc(doc(db, 'notices', id));
+  };
+
+  const addResource = async (e) => {
     e.preventDefault();
-    const newRes = {
-      id: Date.now(),
+    await addDoc(collection(db, 'resources'), {
       course: e.target.course.value,
       title: e.target.title.value,
       type: e.target.type.value,
       link: e.target.link.value
-    };
-    setResources([newRes, ...resources]);
+    });
     e.target.reset();
   };
 
-  const addPyq = (e) => {
+  const deleteResource = async (id) => {
+    await deleteDoc(doc(db, 'resources', id));
+  };
+
+  const addPyq = async (e) => {
     e.preventDefault();
-    const newPyq = {
-      id: Date.now(),
+    await addDoc(collection(db, 'pyqs'), {
       course: e.target.course.value,
       term: e.target.term.value,
       link: e.target.link.value
-    };
-    setPyqs([newPyq, ...pyqs]);
+    });
     e.target.reset();
   };
 
-  const handleRoutineUpload = (e) => {
+  const deletePyq = async (id) => {
+    await deleteDoc(doc(db, 'pyqs', id));
+  };
+
+  const handleRoutineUpload = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setRoutineImg(reader.result);
-      reader.readAsDataURL(file);
+    if (!file) return;
+    setUploading(true);
+    try {
+      const storageRef = ref(storage, `routines/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      await setDoc(doc(db, 'settings', 'routine'), { url });
+    } catch (err) {
+      console.error(err);
+      alert('Error uploading routine!');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -191,15 +194,10 @@ export default function App() {
               <button 
                 onClick={() => setShowChangePinModal(true)} 
                 className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full flex items-center gap-1 transition"
-                title="Change Admin PIN"
               >
                 <KeyRound className="h-3 w-3 text-amber-400" /> Change PIN
               </button>
-              <button 
-                onClick={() => setIsAdmin(false)} 
-                className="text-slate-400 hover:text-white transition"
-                title="Logout Admin"
-              >
+              <button onClick={() => setIsAdmin(false)} className="text-slate-400 hover:text-white transition">
                 <LogOut className="h-4 w-4" />
               </button>
             </div>
@@ -217,7 +215,6 @@ export default function App() {
 
       {/* Main Container */}
       <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Navigation Tabs */}
         <div className="flex space-x-2 border-b border-slate-800 pb-4 mb-8 overflow-x-auto">
           {[
             { id: 'notices', label: 'Notice Board', icon: Bell },
@@ -244,7 +241,7 @@ export default function App() {
           })}
         </div>
 
-        {/* Dynamic Content Views */}
+        {/* Notices */}
         {activeTab === 'notices' && (
           <div className="space-y-6">
             {isAdmin && (
@@ -254,7 +251,7 @@ export default function App() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input required name="title" placeholder="Notice Title" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500" />
-                  <input required name="category" placeholder="Category (e.g. Exam, Assignment)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500" />
+                  <input required name="category" placeholder="Category (e.g. Exam)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500" />
                 </div>
                 <textarea required name="content" placeholder="Notice details..." rows="3" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500"></textarea>
                 <button className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium">Post Notice</button>
@@ -275,7 +272,7 @@ export default function App() {
                     <p className="text-sm text-slate-400">{notice.content}</p>
                   </div>
                   {isAdmin && (
-                    <button onClick={() => setNotices(notices.filter(n => n.id !== notice.id))} className="text-slate-500 hover:text-red-400 p-2">
+                    <button onClick={() => deleteNotice(notice.id)} className="text-slate-500 hover:text-red-400 p-2">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   )}
@@ -285,12 +282,16 @@ export default function App() {
           </div>
         )}
 
+        {/* Routine */}
         {activeTab === 'routine' && (
           <div className="space-y-6">
             {isAdmin && (
               <div className="bg-slate-800/50 border border-slate-700/50 p-5 rounded-2xl">
-                <label className="block text-sm font-medium text-slate-300 mb-2">Update Routine Image</label>
-                <input type="file" accept="image/*" onChange={handleRoutineUpload} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer" />
+                <label className="block text-sm font-medium text-slate-300 mb-2">Upload Cloud Routine Image</label>
+                <div className="flex items-center gap-4">
+                  <input type="file" accept="image/*" onChange={handleRoutineUpload} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer" />
+                  {uploading && <span className="text-xs text-amber-400 flex items-center gap-1"><UploadCloud className="h-4 w-4 animate-bounce" /> Uploading to Cloud...</span>}
+                </div>
               </div>
             )}
             <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-4 overflow-hidden text-center">
@@ -299,15 +300,14 @@ export default function App() {
           </div>
         )}
 
+        {/* Resources */}
         {activeTab === 'resources' && (
           <div className="space-y-6">
             {isAdmin && (
               <form onSubmit={addResource} className="bg-slate-800/50 border border-slate-700/50 p-5 rounded-2xl space-y-4">
-                <h3 className="font-semibold text-indigo-400 flex items-center gap-2">
-                  <Plus className="h-4 w-4" /> Upload Resource Link
-                </h3>
+                <h3 className="font-semibold text-indigo-400 flex items-center gap-2"><Plus className="h-4 w-4" /> Upload Resource Link</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input required name="course" placeholder="Course Code (e.g. SWE311)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
+                  <input required name="course" placeholder="Course Code" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
                   <input required name="title" placeholder="Topic Title" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
                   <select name="type" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500">
                     <option value="Slide">Slide</option>
@@ -315,14 +315,14 @@ export default function App() {
                     <option value="PDF">PDF</option>
                   </select>
                 </div>
-                <input required name="link" placeholder="Drive or Download URL" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500" />
+                <input required name="link" placeholder="Drive / Download Link" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500" />
                 <button className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium">Add Resource</button>
               </form>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {resources.map((res) => (
-                <div key={res.id} className="bg-slate-800/30 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl flex items-center justify-between">
+                <div key={res.id} className="bg-slate-800/30 border border-slate-800 p-5 rounded-2xl flex items-center justify-between">
                   <div>
                     <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">{res.course} • {res.type}</span>
                     <h4 className="text-base font-semibold text-slate-200 mt-1">{res.title}</h4>
@@ -332,7 +332,7 @@ export default function App() {
                       <ExternalLink className="h-4 w-4" />
                     </a>
                     {isAdmin && (
-                      <button onClick={() => setResources(resources.filter(r => r.id !== res.id))} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-xl transition">
+                      <button onClick={() => deleteResource(res.id)} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-xl transition">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     )}
@@ -343,16 +343,15 @@ export default function App() {
           </div>
         )}
 
+        {/* PYQ */}
         {activeTab === 'pyq' && (
           <div className="space-y-6">
             {isAdmin && (
               <form onSubmit={addPyq} className="bg-slate-800/50 border border-slate-700/50 p-5 rounded-2xl space-y-4">
-                <h3 className="font-semibold text-indigo-400 flex items-center gap-2">
-                  <Plus className="h-4 w-4" /> Add Previous Year Question
-                </h3>
+                <h3 className="font-semibold text-indigo-400 flex items-center gap-2"><Plus className="h-4 w-4" /> Add Previous Year Question</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input required name="course" placeholder="Course Code" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
-                  <input required name="term" placeholder="Term (e.g., Midterm 2025)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
+                  <input required name="term" placeholder="Term (e.g., Mid 2025)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
                 </div>
                 <input required name="link" placeholder="Drive / Question Link" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm w-full focus:outline-none focus:border-indigo-500" />
                 <button className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium">Save Question</button>
@@ -371,7 +370,7 @@ export default function App() {
                       <Download className="h-4 w-4" />
                     </a>
                     {isAdmin && (
-                      <button onClick={() => setPyqs(pyqs.filter(p => p.id !== q.id))} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-xl transition">
+                      <button onClick={() => deletePyq(q.id)} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-xl transition">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     )}
@@ -382,6 +381,7 @@ export default function App() {
           </div>
         )}
 
+        {/* Faculty */}
         {activeTab === 'faculty' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[
@@ -407,21 +407,12 @@ export default function App() {
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full space-y-4">
-            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <Lock className="h-5 w-5 text-indigo-400" /> CR Access Verification
-            </h3>
-            <p className="text-xs text-slate-400">Enter Admin PIN to manage content.</p>
+            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2"><Lock className="h-5 w-5 text-indigo-400" /> CR Access Verification</h3>
             <form onSubmit={handleAdminLogin} className="space-y-4">
-              <input 
-                type="password" 
-                placeholder="Enter PIN" 
-                value={pinInput} 
-                onChange={(e) => setPinInput(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 p-3 rounded-xl text-center text-lg font-mono focus:outline-none focus:border-indigo-500" 
-              />
+              <input type="password" placeholder="Enter PIN" value={pinInput} onChange={(e) => setPinInput(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-3 rounded-xl text-center text-lg font-mono focus:outline-none focus:border-indigo-500" />
               <div className="flex justify-end space-x-2">
-                <button type="button" onClick={() => setShowAdminModal(false)} className="px-4 py-2 text-xs text-slate-400 hover:text-white">Cancel</button>
-                <button type="submit" className="px-5 py-2 text-xs bg-indigo-600 hover:bg-indigo-500 font-medium rounded-lg">Verify</button>
+                <button type="button" onClick={() => setShowAdminModal(false)} className="px-4 py-2 text-xs text-slate-400">Cancel</button>
+                <button type="submit" className="px-5 py-2 text-xs bg-indigo-600 hover:bg-indigo-500 rounded-lg">Verify</button>
               </div>
             </form>
           </div>
@@ -432,41 +423,16 @@ export default function App() {
       {showChangePinModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full space-y-4">
-            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <KeyRound className="h-5 w-5 text-amber-400" /> Change CR Admin PIN
-            </h3>
+            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2"><KeyRound className="h-5 w-5 text-amber-400" /> Change CR Admin PIN</h3>
             {pinChangeSuccess ? (
-              <div className="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
-                <CheckCircle2 className="h-5 w-5" />
-                <span>{pinChangeSuccess}</span>
-              </div>
+              <div className="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20"><CheckCircle2 className="h-5 w-5" /><span>{pinChangeSuccess}</span></div>
             ) : (
               <form onSubmit={handleChangePin} className="space-y-3">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Current PIN</label>
-                  <input 
-                    type="password" 
-                    required
-                    placeholder="Old PIN" 
-                    value={oldPinInput} 
-                    onChange={(e) => setOldPinInput(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-center text-base font-mono focus:outline-none focus:border-indigo-500" 
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">New Secret PIN</label>
-                  <input 
-                    type="password" 
-                    required
-                    placeholder="New PIN" 
-                    value={newPinInput} 
-                    onChange={(e) => setNewPinInput(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-center text-base font-mono focus:outline-none focus:border-indigo-500" 
-                  />
-                </div>
+                <input type="password" required placeholder="Old PIN" value={oldPinInput} onChange={(e) => setOldPinInput(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-center font-mono" />
+                <input type="password" required placeholder="New PIN" value={newPinInput} onChange={(e) => setNewPinInput(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-center font-mono" />
                 <div className="flex justify-end space-x-2 pt-2">
-                  <button type="button" onClick={() => setShowChangePinModal(false)} className="px-4 py-2 text-xs text-slate-400 hover:text-white">Cancel</button>
-                  <button type="submit" className="px-5 py-2 text-xs bg-amber-600 hover:bg-amber-500 font-medium rounded-lg text-white">Save PIN</button>
+                  <button type="button" onClick={() => setShowChangePinModal(false)} className="px-4 py-2 text-xs text-slate-400">Cancel</button>
+                  <button type="submit" className="px-5 py-2 text-xs bg-amber-600 hover:bg-amber-500 rounded-lg text-white">Save PIN</button>
                 </div>
               </form>
             )}
