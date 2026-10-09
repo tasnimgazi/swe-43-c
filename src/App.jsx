@@ -14,7 +14,9 @@ import {
   ShieldAlert,
   GraduationCap,
   KeyRound,
-  CheckCircle2
+  CheckCircle2,
+  Mail,
+  BookMarked
 } from 'lucide-react';
 import { db } from './firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc } from 'firebase/firestore';
@@ -35,8 +37,9 @@ export default function App() {
   const [notices, setNotices] = useState([]);
   const [resources, setResources] = useState([]);
   const [pyqs, setPyqs] = useState([]);
+  const [faculties, setFaculties] = useState([]);
 
-  // Fetch Real-time Cloud Data (Notices, Resources, PYQs)
+  // Fetch Real-time Cloud Data (Notices, Resources, PYQs, Faculties)
   useEffect(() => {
     // 1. Sync Notices
     const unsubNotices = onSnapshot(collection(db, 'notices'), (snapshot) => {
@@ -53,10 +56,16 @@ export default function App() {
       setPyqs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    // 4. Sync Faculty Directory
+    const unsubFaculties = onSnapshot(collection(db, 'faculties'), (snapshot) => {
+      setFaculties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubNotices();
       unsubResources();
       unsubPyqs();
+      unsubFaculties();
     };
   }, []);
 
@@ -139,6 +148,21 @@ export default function App() {
 
   const deletePyq = async (id) => {
     await deleteDoc(doc(db, 'pyqs', id));
+  };
+
+  const addFaculty = async (e) => {
+    e.preventDefault();
+    await addDoc(collection(db, 'faculties'), {
+      name: e.target.name.value,
+      role: e.target.role.value,
+      course: e.target.course.value,
+      email: e.target.email.value
+    });
+    e.target.reset();
+  };
+
+  const deleteFaculty = async (id) => {
+    await deleteDoc(doc(db, 'faculties', id));
   };
 
   return (
@@ -342,24 +366,49 @@ export default function App() {
           </div>
         )}
 
-        {/* Faculty */}
+        {/* Faculty Directory */}
         {activeTab === 'faculty' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[
-              { name: 'Dr. Jane Doe', role: 'Associate Professor', course: 'Software Architecture', email: 'jane.doe@university.edu' },
-              { name: 'Prof. John Smith', role: 'Assistant Professor', course: 'Database Systems', email: 'john.smith@university.edu' },
-            ].map((fac, idx) => (
-              <div key={idx} className="bg-slate-800/30 border border-slate-800 p-5 rounded-2xl flex space-x-4 items-center">
-                <div className="p-3 bg-indigo-600/20 text-indigo-400 rounded-xl">
-                  <User className="h-6 w-6" />
+          <div className="space-y-6">
+            {isAdmin && (
+              <form onSubmit={addFaculty} className="bg-slate-800/50 border border-slate-700/50 p-5 rounded-2xl space-y-4">
+                <h3 className="font-semibold text-indigo-400 flex items-center gap-2"><Plus className="h-4 w-4" /> Add Faculty Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input required name="name" placeholder="Faculty Name (e.g., Dr. Jane Doe)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
+                  <input required name="role" placeholder="Designation (e.g., Assistant Professor)" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
+                  <input required name="course" placeholder="Course Code / Name" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
+                  <input required name="email" type="email" placeholder="Email Address" className="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
                 </div>
-                <div>
-                  <h4 className="font-semibold text-slate-200">{fac.name}</h4>
-                  <p className="text-xs text-indigo-400">{fac.role} - {fac.course}</p>
-                  <p className="text-xs text-slate-400 mt-1">{fac.email}</p>
-                </div>
-              </div>
-            ))}
+                <button className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium">Add Faculty</button>
+              </form>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {faculties.length === 0 ? (
+                <p className="text-slate-400 text-sm italic col-span-2">No faculty information added yet.</p>
+              ) : (
+                faculties.map((fac) => (
+                  <div key={fac.id} className="bg-slate-800/30 border border-slate-800 p-5 rounded-2xl flex items-center justify-between">
+                    <div className="flex space-x-4 items-center">
+                      <div className="p-3 bg-indigo-600/20 text-indigo-400 rounded-xl">
+                        <User className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-slate-200">{fac.name}</h4>
+                        <p className="text-xs text-indigo-400">{fac.role} - {fac.course}</p>
+                        <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                          <Mail className="h-3 w-3" /> {fac.email}
+                        </p>
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <button onClick={() => deleteFaculty(fac.id)} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-xl transition">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>
