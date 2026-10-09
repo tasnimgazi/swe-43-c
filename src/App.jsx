@@ -14,12 +14,11 @@ import {
   ShieldAlert,
   GraduationCap,
   KeyRound,
-  CheckCircle2,
-  UploadCloud
+  CheckCircle2
 } from 'lucide-react';
-import { db, storage } from './firebase';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, getDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db } from './firebase';
+import { collection, onSnapshot, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import Routine from './Routine'; // Template Routine Component
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('notices');
@@ -27,7 +26,6 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [showChangePinModal, setShowChangePinModal] = useState(false);
-  const [uploading, setUploading] = useState(false);
   
   const [adminPin, setAdminPin] = useState(() => localStorage.getItem('swe_admin_pin') || '1234');
   const [oldPinInput, setOldPinInput] = useState('');
@@ -35,37 +33,28 @@ export default function App() {
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
   const [notices, setNotices] = useState([]);
-  const [routineImg, setRoutineImg] = useState('https://via.placeholder.com/800x400?text=Upload+Class+Routine+Image');
   const [resources, setResources] = useState([]);
   const [pyqs, setPyqs] = useState([]);
 
-  // Fetch Real-time Cloud Data
+  // Fetch Real-time Cloud Data (Notices, Resources, PYQs)
   useEffect(() => {
     // 1. Sync Notices
     const unsubNotices = onSnapshot(collection(db, 'notices'), (snapshot) => {
       setNotices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // 2. Sync Routine
-    const unsubRoutine = onSnapshot(doc(db, 'settings', 'routine'), (docSnap) => {
-      if (docSnap.exists()) {
-        setRoutineImg(docSnap.data().url);
-      }
-    });
-
-    // 3. Sync Resources
+    // 2. Sync Resources
     const unsubResources = onSnapshot(collection(db, 'resources'), (snapshot) => {
       setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // 4. Sync PYQs
+    // 3. Sync PYQs
     const unsubPyqs = onSnapshot(collection(db, 'pyqs'), (snapshot) => {
       setPyqs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     return () => {
       unsubNotices();
-      unsubRoutine();
       unsubResources();
       unsubPyqs();
     };
@@ -151,45 +140,6 @@ export default function App() {
   const deletePyq = async (id) => {
     await deleteDoc(doc(db, 'pyqs', id));
   };
-
-  const handleRoutineUpload = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  setUploading(true);
-  
-  // ImgBB API Key
-  const IMGBB_API_KEY = "e89a553a47993ec5c7344bb801508d7d";
-
-  const formData = new FormData();
-  formData.append("image", file);
-
-  try {
-    // ImgBB-তে ছবি আপলোড
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (data.success) {
-      const imageUrl = data.data.url;
-
-      // Firestore Database-এ ছবির লিংক সেভ করা (settings > routine)
-      await setDoc(doc(db, 'settings', 'routine'), { url: imageUrl });
-
-      alert('Routine uploaded successfully!');
-    } else {
-      alert('Failed to upload image via ImgBB!');
-    }
-  } catch (err) {
-    console.error(err);
-    alert('Error uploading routine!');
-  } finally {
-    setUploading(false);
-  }
-};
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
@@ -307,18 +257,7 @@ export default function App() {
         {/* Routine */}
         {activeTab === 'routine' && (
           <div className="space-y-6">
-            {isAdmin && (
-              <div className="bg-slate-800/50 border border-slate-700/50 p-5 rounded-2xl">
-                <label className="block text-sm font-medium text-slate-300 mb-2">Upload Cloud Routine Image</label>
-                <div className="flex items-center gap-4">
-                  <input type="file" accept="image/*" onChange={handleRoutineUpload} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer" />
-                  {uploading && <span className="text-xs text-amber-400 flex items-center gap-1"><UploadCloud className="h-4 w-4 animate-bounce" /> Uploading to Cloud...</span>}
-                </div>
-              </div>
-            )}
-            <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-4 overflow-hidden text-center">
-              <img src={routineImg} alt="Class Routine" className="w-full h-auto rounded-xl max-h-[700px] object-contain mx-auto" />
-            </div>
+            <Routine />
           </div>
         )}
 
@@ -346,7 +285,7 @@ export default function App() {
               {resources.map((res) => (
                 <div key={res.id} className="bg-slate-800/30 border border-slate-800 p-5 rounded-2xl flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">{res.course} • {res.type}</span>
+                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">{res.course} - {res.type}</span>
                     <h4 className="text-base font-semibold text-slate-200 mt-1">{res.title}</h4>
                   </div>
                   <div className="flex items-center space-x-2">
@@ -416,7 +355,7 @@ export default function App() {
                 </div>
                 <div>
                   <h4 className="font-semibold text-slate-200">{fac.name}</h4>
-                  <p className="text-xs text-indigo-400">{fac.role} • {fac.course}</p>
+                  <p className="text-xs text-indigo-400">{fac.role} - {fac.course}</p>
                   <p className="text-xs text-slate-400 mt-1">{fac.email}</p>
                 </div>
               </div>
