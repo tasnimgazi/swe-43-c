@@ -153,21 +153,43 @@ export default function App() {
   };
 
   const handleRoutineUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const storageRef = ref(storage, `routines/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await setDoc(doc(db, 'settings', 'routine'), { url });
-    } catch (err) {
-      console.error(err);
-      alert('Error uploading routine!');
-    } finally {
-      setUploading(false);
+  const file = e.target.files[0];
+  if (!file) return;
+
+  setUploading(true);
+  
+  // ImgBB API Key
+  const IMGBB_API_KEY = "e89a553a47993ec5c7344bb801508d7d";
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  try {
+    // ImgBB-তে ছবি আপলোড
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      const imageUrl = data.data.url;
+
+      // Firestore Database-এ ছবির লিংক সেভ করা (settings > routine)
+      await setDoc(doc(db, 'settings', 'routine'), { url: imageUrl });
+
+      alert('Routine uploaded successfully!');
+    } else {
+      alert('Failed to upload image via ImgBB!');
     }
-  };
+  } catch (err) {
+    console.error(err);
+    alert('Error uploading routine!');
+  } finally {
+    setUploading(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
